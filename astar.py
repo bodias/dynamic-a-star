@@ -1,6 +1,8 @@
+from re import S
+import copy
 import pygame
-import math
-from queue import PriorityQueue
+from path_finding import a_star
+
 
 TOP_MENU_HEIGHT = 0.025 #perc
 WIN_WIDTH = 800
@@ -22,6 +24,7 @@ PURPLE = (128, 0, 128)
 ORANGE = (255, 165 ,0)
 GREY = (128, 128, 128)
 TURQUOISE = (64, 224, 208)
+BROWN = (150, 75, 0)
 
 
 class Grid:
@@ -44,6 +47,12 @@ class Grid:
 		self.grid = []
 		self.make_grid()
 
+	def reset_search_area(self):
+		for row in self.grid:
+			for spot in row:
+				if spot.is_open() or spot.is_closed() or spot.is_path():
+					spot.reset()
+
 	def get_grid(self):
 		return self.grid
 
@@ -60,7 +69,6 @@ class Grid:
 		else:
 			pass
 			#TODO: add exception
-
 
 	def draw_grid(self, win):
 		for i in range(self.rows):
@@ -125,12 +133,18 @@ class Spot:
 
 	def is_barrier(self):
 		return self.color == BLACK
+	
+	def is_object(self):
+		return self.color == BROWN
 
 	def is_start(self):
 		return self.color == ORANGE
 
 	def is_end(self):
 		return self.color == TURQUOISE
+
+	def is_path(self):
+		return self.color == PURPLE
 
 	def reset(self):
 		self.color = WHITE
@@ -147,6 +161,9 @@ class Spot:
 	def make_barrier(self):
 		self.color = BLACK
 
+	def make_object(self):
+		self.color = BROWN
+
 	def make_end(self):
 		self.color = TURQUOISE
 
@@ -158,80 +175,25 @@ class Spot:
 
 	def update_neighbors(self, grid):
 		self.neighbors = []
-		if self.row < self.total_rows - 1 and not grid[self.row + 1][self.col].is_barrier(): # DOWN
+		if self.row < self.total_rows - 1 and not grid[self.row + 1][self.col].is_barrier() and not grid[self.row + 1][self.col].is_object(): # DOWN
 			self.neighbors.append(grid[self.row + 1][self.col])
 
-		if self.row > 0 and not grid[self.row - 1][self.col].is_barrier(): # UP
+		if self.row > 0 and not grid[self.row - 1][self.col].is_barrier() and not grid[self.row - 1][self.col].is_object(): # UP
 			self.neighbors.append(grid[self.row - 1][self.col])
 
-		if self.col < self.total_rows - 1 and not grid[self.row][self.col + 1].is_barrier(): # RIGHT
+		if self.col < self.total_rows - 1 and not grid[self.row][self.col + 1].is_barrier() and not grid[self.row][self.col + 1].is_object(): # RIGHT
 			self.neighbors.append(grid[self.row][self.col + 1])
 
-		if self.col > 0 and not grid[self.row][self.col - 1].is_barrier(): # LEFT
+		if self.col > 0 and not grid[self.row][self.col - 1].is_barrier() and not grid[self.row][self.col - 1].is_object(): # LEFT
 			self.neighbors.append(grid[self.row][self.col - 1])
 
 	def __lt__(self, other):
 		return False
 
-## heuristic function? 
-# distance function (manhathan)
-def h(p1, p2):
-	x1, y1 = p1
-	x2, y2 = p2
-	return abs(x1 - x2) + abs(y1 - y2)
 
 
-def reconstruct_path(came_from, current, draw):
-	while current in came_from:
-		current = came_from[current]
-		current.make_path()
-		draw()
 
 
-def algorithm(draw, grid, start, end):
-	count = 0
-	open_set = PriorityQueue()
-	open_set.put((0, count, start))
-	came_from = {}
-	g_score = {spot: float("inf") for row in grid for spot in row}
-	g_score[start] = 0
-	f_score = {spot: float("inf") for row in grid for spot in row}
-	f_score[start] = h(start.get_pos(), end.get_pos())
-
-	open_set_hash = {start}
-
-	while not open_set.empty():
-		for event in pygame.event.get():
-			if event.type == pygame.QUIT:
-				pygame.quit()
-
-		current = open_set.get()[2]
-		open_set_hash.remove(current)
-
-		if current == end:
-			reconstruct_path(came_from, end, draw)
-			end.make_end()
-			return True
-
-		for neighbor in current.neighbors:
-			temp_g_score = g_score[current] + 1
-
-			if temp_g_score < g_score[neighbor]:
-				came_from[neighbor] = current
-				g_score[neighbor] = temp_g_score
-				f_score[neighbor] = temp_g_score + h(neighbor.get_pos(), end.get_pos())
-				if neighbor not in open_set_hash:
-					count += 1
-					open_set.put((f_score[neighbor], count, neighbor))
-					open_set_hash.add(neighbor)
-					neighbor.make_open()
-
-		draw()
-
-		if current != start:
-			current.make_closed()
-
-	return False
 
 
 # def make_grid(rows, start_coord, end_coord, width):
@@ -271,6 +233,21 @@ def algorithm(draw, grid, start, end):
 # 	for j in range(rows):	
 # 		pygame.draw.line(win, GREY, (start_x + (j * gap), start_y), (start_x + (j * gap), end_y))
 
+def reverse_path(path, current):
+	end = current
+	path_list = []
+	reverse = {}
+	while current in path:
+		current = path[current]
+		path_list.append(current)
+	path_list.reverse()
+
+	for pos in range(len(path_list)-1):
+		reverse[path_list[pos]] = path_list[pos+1]
+
+	reverse[path_list[len(path_list)-1]] = end
+
+	return reverse	
 
 def draw(win, mode, grid_list, top_menu, rows, width):
 
@@ -314,6 +291,8 @@ def main(win, win_size, top_menu_height):
 	ROWS = 50
 	start = None
 	end = None
+	planned_path = None
+	current = None
 	mode = "DESIGN"
 	width, height = win_size	
 	
@@ -365,24 +344,81 @@ def main(win, win_size, top_menu_height):
 						end = None
 
 				if event.type == pygame.KEYDOWN:					
-					mode = "EXECUTION"		
 					if event.key == pygame.K_SPACE and start and end:
 						upd_grid = grids[0].get_grid()
 						for row in upd_grid:
 							for spot in row:
-								spot.update_neighbors(upd_grid)
-
-						algorithm(lambda: draw(win, mode, grids, top_menu, ROWS, width), upd_grid, start, end)
-
-									
+								spot.update_neighbors(upd_grid)						
+						mode = "EXECUTION"		
 
 					if event.key == pygame.K_c:
 						start = None
 						end = None
+						planned_path = None
+						current = None
+						mode = "DESIGN"
 						grids[0].reset_grid()
 						# grid = make_grid(ROWS, width)
 		if mode == "EXECUTION":
-			pass
+			planned_path = a_star(lambda: draw(win, mode, grids, top_menu, ROWS, width), upd_grid, start, end)
+			# make path from start to end
+			planned_path = reverse_path(planned_path, end)
+			print("alg execution ended! ")
+			mode = "WALK"
+			end.make_end()
+			current = start
+
+		if mode == "WALK":
+			for event in pygame.event.get():
+				if event.type == pygame.QUIT:
+					run = False
+
+				#place an object
+				if pygame.mouse.get_pressed()[0]: # LEFT
+					pos = pygame.mouse.get_pos()					
+					spot = get_clicked_spot_grid(pos, grids)
+					# if any point except for start, end or barrier
+					if spot != end and spot != start and not spot.is_barrier() and not spot.is_path():
+						spot.make_object()
+
+				# undo object placement
+				elif pygame.mouse.get_pressed()[2]: # RIGHT
+					pos = pygame.mouse.get_pos()
+					spot = get_clicked_spot_grid(pos, grids)
+					if spot.is_object():
+						spot.reset()					
+
+				if event.type == pygame.KEYDOWN:					
+					if event.key == pygame.K_SPACE and planned_path:						
+						next = planned_path[current]
+						if next != end:
+							# hit an object
+							if next.is_object():
+								## behaviour for a*								
+								start, current = current, start
+								start.make_start()
+								current.reset()							
+								current = None
+								planned_path = None
+								grids[0].reset_search_area()
+								upd_grid = grids[0].get_grid()
+								for row in upd_grid:
+									for spot in row:
+										spot.update_neighbors(upd_grid)						
+								mode = "EXECUTION"
+							else:
+								current = next
+								current.make_path()
+							
+
+					if event.key == pygame.K_c:
+						start = None
+						end = None
+						planned_path = None
+						current = None
+						mode = "DESIGN"
+						grids[0].reset_grid()
+
 
 
 	pygame.quit()
