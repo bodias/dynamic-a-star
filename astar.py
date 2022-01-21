@@ -2,19 +2,20 @@ from re import S
 import copy
 import pygame
 from path_finding import a_star
+from path_finding import d_star_lite, move_and_rescan
 
 
 TOP_MENU_HEIGHT = 0.025 #perc
 WIN_WIDTH = 800
 WIN_HEIGHT = WIN_WIDTH + int((WIN_WIDTH * (TOP_MENU_HEIGHT)))
 # MAIN_GRID_HEIGHT = MAIN_GRID_WIDTH - (MAIN_GRID_WIDTH * (TOP_MENU_HEIGHT))
-
+SCAN_RANGE = 1
 
 WIN = pygame.display.set_mode((WIN_WIDTH, WIN_HEIGHT))
 pygame.display.set_caption("A* Path Finding Algorithm")
 pygame.font.init()
 
-RED = (255, 0, 0)
+RED = (200, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 255, 0)
 YELLOW = (255, 255, 0)
@@ -97,7 +98,9 @@ class Rectangle:
 class TopBar(Rectangle):
 	def __init__(self, x, y, width, height):
 		self.current_mode = "DESIGN"
+		self.alg = ""
 		self.mode_string_pos = (x+5,y+2)
+		# self.alg_string_pos = (x+200,y+2)
 		self.mode_string_size = 10
 		self.mode_string_color = WHITE
 		super().__init__(x, y, width, height)
@@ -107,10 +110,18 @@ class TopBar(Rectangle):
 		self.draw(win)
 		self.draw_text(win, f"MODE: {self.current_mode}", self.mode_string_size, self.mode_string_color, self.mode_string_pos)
 
+	def update_alg(self, win, alg):
+		pass
+		# self.alg = alg
+		# self.draw(win)
+		# self.draw_text(win, f"ALGORITHM: {self.alg}", self.mode_string_size, self.mode_string_color, self.alg_string_pos)
+
 class Spot:
-	def __init__(self, row, col, width, total_rows, grid_coord):
+	def __init__(self, row, col, width, total_rows, grid_coord, g=None, rhs=None):
 		self.row = row
 		self.col = col
+		self.g = g
+		self.rhs = rhs
 		### cant be absolute X,Y
 		self.x_start, self.y_start, self.x_end, self.y_end = grid_coord
 		self.x = self.x_start + (col * width)
@@ -172,6 +183,24 @@ class Spot:
 
 	def draw(self, win):
 		pygame.draw.rect(win, self.color, (self.x, self.y, self.width, self.width))
+		# font = pygame.font.SysFont("Comic Sans MS", 15, True)
+		# text_color = BLACK if self.color == WHITE else WHITE
+		# text_surface = font.render(f"({self.row}, {self.col})", True, text_color)
+		# text_rect = text_surface.get_rect(topleft=(self.x+5, self.y+5))
+		# win.blit(text_surface, text_rect)
+		# text_surface = font.render(f"x: {self.x}, y: {self.y}", True, text_color)
+		# text_rect = text_surface.get_rect(topleft=(self.x+5, self.y+20))
+		# win.blit(text_surface, text_rect)
+		# text_surface = font.render(f"g: {self.g}", True, text_color)
+		# text_rect = text_surface.get_rect(topleft=(self.x+5, self.y+40))
+		# win.blit(text_surface, text_rect)
+		# text_surface = font.render(f"rhs: {self.rhs}", True, text_color)
+		# text_rect = text_surface.get_rect(topleft=(self.x+5, self.y+55))
+		# win.blit(text_surface, text_rect)
+
+		# text_surface = font.render(f"col: {self.col}", True, text_color)
+		# text_rect = text_surface.get_rect(topleft=(self.x+5, self.y+65))
+		# win.blit(text_surface, text_rect)
 
 	def update_neighbors(self, grid):
 		self.neighbors = []
@@ -186,6 +215,32 @@ class Spot:
 
 		if self.col > 0 and not grid[self.row][self.col - 1].is_barrier() and not grid[self.row][self.col - 1].is_object(): # LEFT
 			self.neighbors.append(grid[self.row][self.col - 1])
+
+		# if self.row < self.total_rows - 1:
+		# 	if grid[self.row + 1][self.col].is_barrier() or grid[self.row + 1][self.col].is_object(): # DOWN
+		# 		self.neighbors[grid[self.row + 1][self.col]] = float("inf")
+		# 	else:
+		# 		self.neighbors[grid[self.row + 1][self.col]] = 1
+
+		# if self.row > 0:
+		# 	# UP
+		# 	if grid[self.row - 1][self.col].is_barrier() or grid[self.row - 1][self.col].is_object():
+		# 		self.neighbors[grid[self.row - 1][self.col]] = float("inf")
+		# 	else:
+		# 		self.neighbors[grid[self.row - 1][self.col]] = 1				
+
+		# if self.col < self.total_rows - 1:
+		# 	if grid[self.row][self.col + 1].is_barrier() or grid[self.row][self.col + 1].is_object(): # RIGHT
+		# 		self.neighbors[grid[self.row][self.col + 1]] = float("inf")
+		# 	else:
+		# 		self.neighbors[grid[self.row][self.col + 1]] = 1
+
+		# if self.col > 0:
+		# 	if grid[self.row][self.col - 1].is_barrier() or grid[self.row][self.col - 1].is_object(): # LEFT
+		# 		self.neighbors[grid[self.row][self.col - 1]] = float("inf")
+		# 	else:
+		# 		self.neighbors[grid[self.row][self.col - 1]] = 1
+		
 
 	def __lt__(self, other):
 		return False
@@ -249,7 +304,7 @@ def reverse_path(path, current):
 
 	return reverse	
 
-def draw(win, mode, grid_list, top_menu, rows, width):
+def draw(win, mode, alg, grid_list, top_menu, rows, width):
 
 	win.fill(WHITE)
 	# if mode == "DESIGN":
@@ -262,6 +317,7 @@ def draw(win, mode, grid_list, top_menu, rows, width):
 	design_grid.draw_grid(win)
 
 	top_menu.update_mode(win, mode)	
+	top_menu.update_alg(win, alg)
 	pygame.display.update()
 
 
@@ -293,7 +349,13 @@ def main(win, win_size, top_menu_height):
 	end = None
 	planned_path = None
 	current = None
+	# d*
+	k_m = 0
+	queue = []
+	g_score = {}
+	rhs_score = {}
 	mode = "DESIGN"
+	alg = "NONE"
 	width, height = win_size	
 	
 	# in design mode start with only one grid
@@ -309,7 +371,7 @@ def main(win, win_size, top_menu_height):
 
 	run = True
 	while run:
-		draw(win, mode, grids, top_menu, ROWS, width)
+		draw(win, mode, alg, grids, top_menu, ROWS, width)
 		if mode == "DESIGN":			
 			# run = False
 			for event in pygame.event.get():
@@ -349,7 +411,16 @@ def main(win, win_size, top_menu_height):
 						for row in upd_grid:
 							for spot in row:
 								spot.update_neighbors(upd_grid)						
-						mode = "EXECUTION"		
+						mode = "EXECUTION"
+						alg = "a-star"
+
+					if event.key == pygame.K_RETURN and start and end:
+						upd_grid = grids[0].get_grid()
+						for row in upd_grid:
+							for spot in row:
+								spot.update_neighbors(upd_grid)		
+						mode = "EXECUTION"
+						alg = "d-star-lite"
 
 					if event.key == pygame.K_c:
 						start = None
@@ -360,13 +431,25 @@ def main(win, win_size, top_menu_height):
 						grids[0].reset_grid()
 						# grid = make_grid(ROWS, width)
 		if mode == "EXECUTION":
-			planned_path = a_star(lambda: draw(win, mode, grids, top_menu, ROWS, width), upd_grid, start, end)
-			# make path from start to end
-			planned_path = reverse_path(planned_path, end)
-			print("alg execution ended! ")
-			mode = "WALK"
-			end.make_end()
-			current = start
+			if alg == "a-star":
+				planned_path = a_star(lambda: draw(win, mode, alg, grids, top_menu, ROWS, width), upd_grid, start, end)
+				# make path from start to end
+				planned_path = reverse_path(planned_path, end)
+				print("alg execution ended! ")
+				mode = "WALK"
+				end.make_end()
+				current = start
+			elif alg == "d-star-lite":
+				# d_star_lite
+				last = start
+				current = start
+				print("running D*")
+				queue, k_m = d_star_lite(lambda: draw(win, mode, alg, grids, top_menu, ROWS, width), upd_grid, queue, start, end, k_m)
+				print("FINISHED running D*")
+				mode = "WALK"
+				start.make_start()
+				end.make_end()
+
 
 		if mode == "WALK":
 			for event in pygame.event.get():
@@ -380,6 +463,10 @@ def main(win, win_size, top_menu_height):
 					# if any point except for start, end or barrier
 					if spot != end and spot != start and not spot.is_barrier() and not spot.is_path():
 						spot.make_object()
+						upd_grid = grids[0].get_grid()
+						for row in upd_grid:
+							for spot in row:
+								spot.update_neighbors(upd_grid)	
 
 				# undo object placement
 				elif pygame.mouse.get_pressed()[2]: # RIGHT
@@ -400,6 +487,7 @@ def main(win, win_size, top_menu_height):
 								current.reset()							
 								current = None
 								planned_path = None
+								# now done at every object placement
 								grids[0].reset_search_area()
 								upd_grid = grids[0].get_grid()
 								for row in upd_grid:
@@ -409,7 +497,14 @@ def main(win, win_size, top_menu_height):
 							else:
 								current = next
 								current.make_path()
-							
+					
+					if event.key == pygame.K_RETURN:
+						print(f"current position {current.get_pos()} ")
+						next, k_m = move_and_rescan(lambda: draw(win, mode, alg, grids, top_menu, ROWS, width), queue, current, end, SCAN_RANGE, k_m)
+						print(f"next position {next.get_pos()} ")
+						current = next
+						current.make_path()
+						
 
 					if event.key == pygame.K_c:
 						start = None
@@ -418,8 +513,7 @@ def main(win, win_size, top_menu_height):
 						current = None
 						mode = "DESIGN"
 						grids[0].reset_grid()
-
-
+					
 
 	pygame.quit()
 
